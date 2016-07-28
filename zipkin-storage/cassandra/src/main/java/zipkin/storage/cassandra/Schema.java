@@ -31,6 +31,8 @@ final class Schema {
 
   private static final String UPGRADE_1 = "/cassandra-schema-cql3-upgrade-1.txt";
 
+  private static final String UPGRADE_2 = "/cassandra-schema-cql3-upgrade-2.txt";
+
   private Schema() {
   }
 
@@ -44,21 +46,15 @@ final class Schema {
     }
     String compactionClass =
         keyspaceMetadata.getTable("traces").getOptions().getCompaction().get("class");
-    boolean hasDefaultTtl = hasUpgrade1_defaultTtl(keyspaceMetadata);
-    if (!hasDefaultTtl) {
-      LOG.warn("schema lacks default ttls: apply {}, or set CassandraStorage.ensureSchema=true",
-          UPGRADE_1);
-    }
-    return new Metadata(compactionClass, hasDefaultTtl);
+    
+    return new Metadata(compactionClass);
   }
 
   static final class Metadata {
     final String compactionClass;
-    final boolean hasDefaultTtl;
 
-    Metadata(String compactionClass, boolean hasDefaultTtl) {
+    Metadata(String compactionClass) {
       this.compactionClass = compactionClass;
-      this.hasDefaultTtl = hasDefaultTtl;
     }
   }
 
@@ -87,6 +83,10 @@ final class Schema {
       LOG.info("Upgrading schema {}", UPGRADE_1);
       applyCqlFile(keyspace, session, UPGRADE_1);
     }
+    if (!hasUpgrade2_spanDurationIndexClusteredByTime(keyspaceMetadata)) {
+      LOG.info("Upgrading schema {}", UPGRADE_2);
+      applyCqlFile(keyspace, session, UPGRADE_2);
+    }
   }
 
   static boolean hasUpgrade1_defaultTtl(KeyspaceMetadata keyspaceMetadata) {
@@ -94,6 +94,13 @@ final class Schema {
     //  backward: this code knows the current schema is too old.
     //  forward:  this code knows the current schema is too new.
     return keyspaceMetadata.getTable("traces").getOptions().getDefaultTimeToLive() > 0;
+  }
+
+  static boolean hasUpgrade2_spanDurationIndexClusteredByTime(KeyspaceMetadata keyspaceMetadata) {
+    // TODO: we need some approach to forward-check compatibility as well.
+    return "ts".equals(keyspaceMetadata.getTable("span_duration_index").getClusteringColumns().get(0).getName())
+            && null == keyspaceMetadata.getTable("service_name_index")
+            && null == keyspaceMetadata.getTable("service_span_name_index");
   }
 
   static void applyCqlFile(String keyspace, Session session, String resource) {
